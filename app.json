@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Closet",
+    "slug": "closet",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "closet",
+    "userInterfaceStyle": "light",
+    "web": {
+      "output": "server"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Closet uses the camera to add the clothes you already own.",
+          "microphonePermission": false
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
