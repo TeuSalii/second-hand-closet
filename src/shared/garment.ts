@@ -54,8 +54,8 @@ export const CONFIDENCES = ["low", "high"] as const;
 // Record<Type, Category> makes TypeScript refuse to build if a type is
 // missing from this table.
 export const CATEGORIES = ["top", "bottom", "dress", "outerwear", "shoes", "accessory"] as const;
-type Type = (typeof TYPES)[number];
-type Category = (typeof CATEGORIES)[number];
+export type Type = (typeof TYPES)[number];
+export type Category = (typeof CATEGORIES)[number];
 const CATEGORY_OF: Record<Type, Category> = {
   shirt: "top", "t-shirt": "top", top: "top", blouse: "top", polo: "top", "tank-top": "top",
   sweater: "top", cardigan: "top", hoodie: "top",
@@ -80,12 +80,52 @@ export type GarmentTags = {
   confidence: (typeof CONFIDENCES)[number];
 };
 
-// The same shape as GarmentTags, written as JSON Schema. OpenAI uses it to
-// force the model's reply into exactly this shape, so the server does not
-// have to repair or second-guess what comes back.
+// The labels a person can check and change, with the words each may take.
+// `label` is free text and `confidence` is the model's own, so neither is here.
+export const FIELDS = {
+  type: TYPES,
+  colors: COLORS,
+  pattern: PATTERNS,
+  material: MATERIALS,
+  season: SEASONS,
+  formality: FORMALITIES,
+  style: STYLES,
+} as const;
+export type Field = keyof typeof FIELDS;
+export const FIELD_NAMES = Object.keys(FIELDS) as Field[];
+
+// Which labels get "please check" when the model says its confidence is low.
+// A first guess: type and pattern are what Scenario B gets wrong, and
+// material is hard to see in a photo. Replace this list with the fields the
+// confusion matrix shows are often wrong (concept v3, technical test 3).
+export const CHECK_WHEN_LOW: readonly Field[] = ["type", "pattern", "material"];
+
+// The fields still waiting for the person: flagged, and not yet checked.
+export function fieldsToCheck(tags: GarmentTags, checked: readonly Field[] = []): Field[] {
+  if (tags.confidence === "high") return [];
+  return CHECK_WHEN_LOW.filter((field) => !checked.includes(field));
+}
+
+// Changes one label. A changed label counts as checked: the person looked.
+export function changeLabel<F extends keyof GarmentTags>(
+  tags: GarmentTags,
+  checked: readonly Field[] = [],
+  field: F,
+  value: GarmentTags[F],
+): { tags: GarmentTags; checked: Field[] } {
+  const isField = (FIELD_NAMES as readonly string[]).includes(field);
+  return {
+    tags: { ...tags, [field]: value },
+    checked: isField && !checked.includes(field as Field) ? [...checked, field as Field] : [...checked],
+  };
+}
+
+// The same shape as GarmentTags, written as JSON Schema. LLM Hub uses it to
+// force the model's reply into exactly this shape; isGarmentTags() below
+// checks that it did, before anything is saved.
 export const TAG_SCHEMA = {
   type: "object",
-  additionalProperties: false, // OpenAI strict mode requires this
+  additionalProperties: false, // strict JSON schema mode requires this
   properties: {
     label: { type: "string" },
     type: { type: "string", enum: TYPES },
@@ -99,6 +139,29 @@ export const TAG_SCHEMA = {
   },
   required: ["label", "type", "colors", "pattern", "material", "season", "formality", "style", "confidence"],
 } as const;
+
+const isOneOf = (words: readonly string[], value: unknown) => typeof value === "string" && words.includes(value);
+
+// "best-chat" is an alias: the model behind it can change, and a reply of the
+// wrong shape, once saved, would crash the screens every time they open.
+export function isGarmentTags(value: unknown): value is GarmentTags {
+  if (typeof value !== "object" || value === null) return false;
+  const tags = value as Record<string, unknown>;
+  const { minItems, maxItems } = TAG_SCHEMA.properties.colors;
+  return (
+    typeof tags.label === "string" &&
+    tags.label.trim() !== "" &&
+    Array.isArray(tags.colors) &&
+    tags.colors.length >= minItems &&
+    tags.colors.length <= maxItems &&
+    tags.colors.every((color) => isOneOf(COLORS, color)) &&
+    FIELD_NAMES.every((field) => field === "colors" || isOneOf(FIELDS[field], tags[field])) &&
+    isOneOf(CONFIDENCES, tags.confidence)
+  );
+}
+
+// Sent with every request to the routes that spend the key (server/passcode.ts).
+export const PASSCODE_HEADER = "x-closet-passcode";
 
 // POST /api/tag
 export type TagRequest = { photoBase64: string };
